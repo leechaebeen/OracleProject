@@ -1,0 +1,1622 @@
+SELECT USER
+FROM DUAL;
+--==>> TEAM3
+
+/*
+            목차
+
+[ 기본테이블 입력/수정/삭제 ] 
+
+- 과목 정보 입력/삭제 기능 
+- 중도탈락자 입력/ 삭제 기능 
+- 교재 테이블(books) 입력/삭제 기능 
+- 과정 테이블(courses) 입력/삭제 기능 
+- 강의실 테이블(classrooms) 입력/삭제 기능 
+
+[ 관리자측 요구분석 ]
+
+Ⅱ. 관리자 계정 관련 기능 구현
+    1. 관리자 로그인
+
+Ⅲ. 교수자 계정 관리 기능 구현
+    2. 교수자 등록 기능
+    3. 모든 교수자의 정보 출력
+    4. 입력된 교수자 정보 수정, 삭제
+
+Ⅳ. 과정 관리 기능 구현
+    5. 개설과정 등록
+    6. 등록된 모든 과정 정보 출력 
+    7. 입력된 개설과정(OP_COURSES) 수정, 삭제
+
+Ⅴ. 과목 관리 기능 구현
+
+    8. 과정 내 여러 과목 등록 (과목개설) 
+    9. 과목에 교수자 미리 배정 
+    10.과목 담당 교수자 변경 
+    11.모든 등록된 과목의 정보 출력
+    12.개설과목 정보 수정, 삭제 
+
+Ⅵ. 학생 관리 기능 구현
+    13. 과정 당 여러명의 학생 등록
+    14.과정별 수강하는 학생들 명단 출력 기능
+    15. 모든 학생의 정보 출력
+    16. 입력된 학생 정보 수정, 삭제 
+    17. 과정별 학생 목록 출력 
+
+Ⅶ. 성적 관리 기능 구현
+    학생 측 요구분석, 교수자측 요구분석과 중복됨
+
+[ 사용자측 요구분석(교수자) ]
+
+Ⅰ.로그인 기능 구현
+    18. 교수자 로그인
+
+Ⅱ. 성적 입력 기능 구현 
+    19. 각 과목 배점 결정 
+    20. 자신이 강의한 과목 성적 처리(입력/수정/삭제)
+
+Ⅲ 성적 출력 기능 구현
+    21. 자신이 강의한 과목의 성적 출력
+
+
+[ 사용자측 요구분석(학생) ]
+
+Ⅰ. 로그인 기능 구현
+    22. 학생 로그인
+
+Ⅱ. 성적 출력 기능 구현
+    23. 수강 끝낸 과목만 출력 기능 
+    24. 수강 끝낸 한 과목 선택 시 성적확인
+    25. 모든 과목을 한 페이지에서 출력(매개변수 :학번)
+    
+*/
+
+
+--[ 기본테이블 입력/수정/삭제 기능]---------------------------------------------------------------------------------------------
+
+-- ○  과목(SUBJECTS) 정보 입력 
+CREATE OR REPLACE PROCEDURE PRC_SUBJECTS_INSERT
+(V_NAME SUBJECTS.NAME%TYPE
+)
+IS
+BEGIN
+    INSERT INTO SUBJECTS(CODE,NAME)    
+    VALUES(SEQ_SUBJECTS.NEXTVAL,V_NAME);
+    
+     COMMIT;
+END;
+
+-- ○ 과목(SUBJECTS) 정보 삭제
+CREATE OR REPLACE PROCEDURE SUBJECTS_DEL
+(V_CODE IN  SUBJECTS.CODE%TYPE) 
+IS
+BEGIN
+
+    DELETE
+    FROM SUBJECTS
+    WHERE CODE = V_CODE;
+    
+    COMMIT;
+END;
+
+--○ 중도탈락자(NON_PASS) 입력 기능
+CREATE OR REPLACE PROCEDURE PRC_NON_PASS_INSERT
+( V_SCL_NUM NON_PASS.SCL_NUM%TYPE)
+IS
+
+    V_START_DATE OP_COURSES.START_DATE%TYPE;
+    V_END_DATE OP_COURSES.END_DATE%TYPE;
+    V_OP_COURSE_CODE STUDENT_COURSES_LISTS.OP_COURSE_CODE%TYPE;
+    
+    USER_DEFINE_ERROR EXCEPTION;
+
+BEGIN
+        SELECT OP_COURSE_CODE INTO V_OP_COURSE_CODE
+        FROM STUDENT_COURSES_LISTS
+        WHERE NUM = V_SCL_NUM;
+        
+        SELECT START_DATE , END_DATE INTO V_START_DATE , V_END_DATE
+        FROM OP_COURSES
+        WHERE CODE = V_OP_COURSE_CODE;
+
+
+        IF(SYSDATE < V_START_DATE OR SYSDATE > V_END_DATE) 
+        THEN RAISE USER_DEFINE_ERROR;
+        END IF;
+       
+        INSERT INTO NON_PASS(NUM,SCL_NUM,NP_DATE)    
+        VALUES(SEQ_NON_PASS.NEXTVAL,V_SCL_NUM,SYSDATE);
+        
+        COMMIT;
+        
+        EXCEPTION
+            WHEN USER_DEFINE_ERROR
+                THEN RAISE_APPLICATION_ERROR(-20001, '중도탈락 일자 오류');
+                ROLLBACK;
+END;
+
+
+--○ 중도탈락자 삭제 기능 
+CREATE OR REPLACE PROCEDURE NP_STUDENTS_DELETE
+( V_NP_NUM     IN NON_PASS.NUM%TYPE)
+IS
+    V_COUNT     NUMBER;
+    USER_DEFINE_ERROR EXCEPTION;
+BEGIN
+    SELECT COUNT(*) INTO V_COUNT
+    FROM NON_PASS
+    WHERE NUM = V_NP_NUM;
+    
+    IF (V_COUNT = 0) 
+        THEN RAISE USER_DEFINE_ERROR;
+    END IF;
+
+        
+    DELETE
+    FROM NON_PASS
+    WHERE NUM = V_NP_NUM;
+    
+     COMMIT;
+    
+    EXCEPTION
+        WHEN USER_DEFINE_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20002, '해당 번호가 존재하지 않습니다.');
+            ROLLBACK;
+        WHEN OTHERS
+            THEN ROLLBACK; 
+END;
+
+--○ 교재(BOOKS) 입력 기능
+CREATE OR REPLACE PROCEDURE PRC_BOOKS_INSERT
+( V_NAME    BOOKS.NAME%TYPE)
+IS
+BEGIN
+
+    INSERT INTO BOOKS(NUM,NAME)    
+    VALUES(SEQ_BOOKS.NEXTVAL,V_NAME);
+    
+    COMMIT;
+
+END;
+
+--○ 교재(BOOKS) 삭제 기능
+CREATE OR REPLACE PROCEDURE PRC_BOOKS_DELETE
+( V_NUM    BOOKS.NUM%TYPE)
+IS
+    
+    V_COUNT     NUMBER;
+    NUMBERMAN   BOOKS.NUM%TYPE;
+    USER_DEFINE_ERROR EXCEPTION;
+    FLAG    NUMBER :=0 ;
+
+    CURSOR CUR_BOOKS
+    IS
+    SELECT NUM
+    FROM BOOKS;
+
+BEGIN
+
+    OPEN CUR_BOOKS;
+    
+    LOOP
+    FETCH CUR_BOOKS INTO NUMBERMAN;
+    
+    IF(V_NUM = NUMBERMAN)
+    THEN DELETE
+         FROM BOOKS
+         WHERE NUM = V_NUM;
+         FLAG := 1;
+    END IF;
+    
+    EXIT WHEN FLAG = 1 OR CUR_BOOKS%NOTFOUND; 
+    
+    END LOOP;
+    
+    CLOSE CUR_BOOKS;
+    
+    IF(FLAG=0)
+    THEN RAISE USER_DEFINE_ERROR;
+    END IF;
+    
+    COMMIT;
+
+    EXCEPTION
+    WHEN USER_DEFINE_ERROR
+    THEN RAISE_APPLICATION_ERROR(-20003 ,'없는 교재입니다.');
+         ROLLBACK;
+
+END;
+
+-- ○ 과정(COURSES) 입력 기능
+CREATE OR REPLACE PROCEDURE PRC_COURSES_ADD
+(V_NAME IN COURSES.NAME%TYPE)
+IS
+BEGIN
+    INSERT INTO COURSES VALUES (SEQ_COURSES_CODE.NEXTVAL, V_NAME);
+END;
+
+
+--○ 과정(COURSES) 삭제 기능
+CREATE OR REPLACE PROCEDURE PRC_DEL_COURSES
+( V_CODE        IN COURSES.CODE%TYPE
+)
+IS
+
+    CURSOR CUR_COURSE_DATE
+    IS
+    SELECT START_DATE, END_DATE
+    FROM OP_COURSES
+    WHERE COURSE_CODE = V_CODE;
+    
+    C_START_DATE   OP_COURSES.START_DATE%TYPE;
+    C_END_DATE     OP_COURSES.END_DATE%TYPE;
+    FLAG           NUMBER :=0 ;
+    USER_DEFINE_ERROR   EXCEPTION;
+
+BEGIN
+
+    OPEN CUR_COURSE_DATE;
+    
+    LOOP
+        FETCH CUR_COURSE_DATE INTO C_START_DATE, C_END_DATE;
+        
+        IF (SYSDATE >= C_START_DATE AND SYSDATE <= C_END_DATE)
+            THEN FLAG := 1;
+        END IF;
+    
+        EXIT WHEN CUR_COURSE_DATE%NOTFOUND;
+        
+    END LOOP;
+    
+    CLOSE CUR_COURSE_DATE;
+    
+    IF (FLAG = 1)
+        THEN RAISE USER_DEFINE_ERROR;
+    ELSE
+        DELETE FROM COURSES
+        WHERE CODE = V_CODE;
+    END IF;
+    
+    COMMIT;
+    
+    EXCEPTION
+        WHEN USER_DEFINE_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20004, '개설중인 과정은 삭제할 수 없습니다.');
+            ROLLBACK;
+END;
+
+--○ 강의실(CLASSROOMS) 입력 기능 
+CREATE OR REPLACE PROCEDURE PRC_CLASSROOMS_ADD 
+( V_INFO   IN  CLASSROOMS.INFO%TYPE)
+IS
+BEGIN
+        INSERT INTO CLASSROOMS(CODE, INFO) VALUES (SEQ_CLASSROOMS.NEXTVAL, V_INFO);
+END;
+
+--○ 강의실(CLASSROOMS) 삭제 기능 
+CREATE OR REPLACE PROCEDURE PRC_CLASSROOMS_DEL 
+( V_CODE    IN  CLASSROOMS.CODE%TYPE
+)
+IS
+    V_COUNT             NUMBER;
+    USER_DEFINE_ERROR   EXCEPTION;
+BEGIN
+        SELECT COUNT(*) INTO V_COUNT
+        FROM CLASSROOMS
+        WHERE CODE = V_CODE;
+        
+        IF(V_COUNT = 0)
+            THEN RAISE USER_DEFINE_ERROR;
+        END IF;
+        
+        DELETE
+        FROM CLASSROOMS 
+        WHERE CODE = V_CODE;
+        
+        COMMIT;
+        
+        EXCEPTION 
+            WHEN USER_DEFINE_ERROR
+            THEN  RAISE_APPLICATION_ERROR(-20005, '해당 강의실이 존재하지 않습니다.');
+                  ROLLBACK;
+END;
+
+
+
+--[ 관리자측 요구분석 ]---------------------------------------------------------------------------------------------------------
+
+--Ⅱ. 관리자 계정 관련 기능 구현
+
+--○  관리자 로그인
+CREATE OR REPLACE FUNCTION FN_ADMIN_LOGIN
+(V_ID IN ADMIN.ID%TYPE 
+,V_PW IN ADMIN.PW%TYPE
+)
+RETURN NUMBER
+IS
+-- 변수 선언
+V_PW2    ADMIN.PW%TYPE;
+V_FLAG   NUMBER := 0;
+-- 에러 변수 선언
+USER_LOGIN_ERROR    EXCEPTION;
+BEGIN
+-- 선언한 변수에 값 저장     
+    BEGIN
+        SELECT PW INTO V_PW2
+        FROM ADMIN
+        WHERE ID = V_ID;
+    EXCEPTION
+        WHEN OTHERS THEN RAISE USER_LOGIN_ERROR;  
+    END;
+    
+    -- 입력한 패스워드가 관리자의 패스워드가 같으면 1 반환
+    IF(V_PW = V_PW2)
+        THEN V_FLAG := 1;
+        ELSE V_FLAG := 2;
+    END IF;
+    
+    RETURN V_FLAG;
+    
+    EXCEPTION 
+       WHEN USER_LOGIN_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20006, '해당 아이디가 존재하지 않습니다.');
+                 ROLLBACK;
+    
+END;
+
+--Ⅲ. 교수자 계정 관리 기능 구현
+
+--○ 교수자 등록 기능(이름, 주민번호 뒷자리) 
+CREATE OR REPLACE PROCEDURE PRC_PROFESSORS_INSERT
+( V_PR_NAME    IN PROFESSORS.NAME%TYPE
+, V_PR_SSN     IN PROFESSORS.SSN%TYPE
+)
+IS
+    V_PR_ID        PROFESSORS.ID%TYPE;
+    V_PR_PW        PROFESSORS.PW%TYPE;
+    
+    SSN_LEGNTH_ERROR EXCEPTION;
+BEGIN
+    V_PR_PW := V_PR_SSN;
+     
+    BEGIN
+        IF(LENGTH(V_PR_SSN) <= 6 OR LENGTH(V_PR_SSN) >=8)
+            THEN RAISE SSN_LEGNTH_ERROR;
+        END IF;
+        
+        SELECT ID INTO V_PR_ID  
+        FROM PROFESSORS
+        WHERE NAME = V_PR_NAME
+          AND SSN = V_PR_SSN;
+    EXCEPTION
+        WHEN SSN_LEGNTH_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20007, '주민번호 길이가 맞지 않습니다.');
+        WHEN OTHERS THEN V_PR_ID := LPAD(SEQ_PROFESSORS_ID.NEXTVAL, 6, '0');
+             INSERT INTO PROFESSORS(ID, PW, SSN, NAME)
+             VALUES(V_PR_ID, V_PR_PW, V_PR_SSN, V_PR_NAME);    
+    END;
+    
+    COMMIT;
+
+END;
+
+--○ 모든 교수자의 정보 출력 뷰(교수자명, 배정된 과목명, 과목기간, 교재명, 강의실, 강의진행여부) 
+CREATE OR REPLACE VIEW VIEW_PROFESSOR_INFO
+AS
+SELECT P1.NAME "교수자명"
+     , P3.NAME "배정된과목명"
+     , P4.START_DATE "과목시작"
+     , P4.END_DATE "과목종료"
+     , P5.NAME "교재명"
+     , P7.INFO "강의실"
+     , (CASE WHEN P4.END_DATE < SYSDATE  THEN '강의 종료' 
+             WHEN SYSDATE < P4.START_DATE THEN '강의 예정'
+             WHEN (P4.START_DATE < SYSDATE) AND (SYSDATE < P4.END_DATE) THEN '강의 중' 
+                 ELSE '보류중'       
+            END) "강의진행여부"
+FROM PROFESSORS P1
+   , PROFESSOR_TEACHABLE_SUBJECTS P2
+   , SUBJECTS P3
+   , OP_SUBJECTS P4
+   , BOOKS P5
+   , OP_COURSES P6
+   , CLASSROOMS P7
+WHERE P1.ID = P2.PRO_ID(+)
+  AND P2.SUB_CODE = P3.CODE(+)
+  AND P2.CODE = P4.PTS_CODE(+)
+  AND P4.BOOK_NUM = P5.NUM(+)
+  AND P4.OP_COURSE_CODE = P6.CODE(+)
+  AND P6.ROOM_CODE = P7.CODE(+)
+  AND P1.ID = P6.PRO_ID;
+  
+--○ 입력된 교수자명 수정 
+CREATE OR REPLACE PROCEDURE PRC_PRO_NAME_CHANGE
+( V_ID       IN PROFESSORS.ID%TYPE
+, V_NAME    IN PROFESSORS.NAME%TYPE
+)   
+IS
+BEGIN
+
+    UPDATE PROFESSORS
+    SET NAME = V_NAME
+    WHERE ID = V_ID; 
+    
+     COMMIT;
+    
+END;
+
+--○ 입력된 교수자 패스워드 수정
+CREATE OR REPLACE PROCEDURE PRC_PRO_PW_CHANGE
+( V_ID       IN PROFESSORS.ID%TYPE
+, V_PW   IN PROFESSORS.PW%TYPE
+)   
+IS
+BEGIN
+
+    UPDATE PROFESSORS
+    SET PW = V_PW
+    WHERE ID = V_ID; 
+    
+     COMMIT;
+    
+END;
+
+--○ 입력된 교수자 정보 삭제
+CREATE OR REPLACE PROCEDURE PRC_PRO_DEL
+( V_ID  IN  PROFESSORS.ID%TYPE)
+IS
+BEGIN
+        DELETE
+        FROM PROFESSORS
+        WHERE ID = V_ID;
+        
+        COMMIT;
+END;
+
+
+--Ⅳ. 과정 관리 기능 구현
+
+--○ 개설과정 등록 기능 (과정명, 과정기간, 강의실 정보, 교수자명)
+CREATE OR REPLACE PROCEDURE PRC_OP_COURSES_INSERT
+( V_NAME        IN  COURSES.NAME%TYPE
+, V_ROOM_CODE   IN  OP_COURSES.ROOM_CODE%TYPE
+, V_START_DATE  IN  OP_COURSES.START_DATE%TYPE  
+, V_END_DATE    IN  OP_COURSES.END_DATE%TYPE  
+, V_PRO_ID      IN  PROFESSORS.ID%TYPE
+)
+IS
+-- 변수 선언 
+C_CODE  COURSES.CODE%TYPE;
+
+BEGIN
+      
+    -- 선언한 변수에 값 저장 
+    BEGIN
+        SELECT CODE INTO C_CODE
+        FROM COURSES
+        WHERE NAME = V_NAME;    
+    EXCEPTION
+        WHEN OTHERS THEN C_CODE := SEQ_COURSES_CODE.NEXTVAL;
+                         INSERT INTO COURSES(CODE,NAME) VALUES(C_CODE,V_NAME);  
+    END;
+    
+    
+    -- 개설과정에 데이터 입력  
+    INSERT INTO OP_COURSES(CODE, ROOM_CODE, COURSE_CODE, PRO_ID, START_DATE, END_DATE) 
+    VALUES(SEQ_OP_COURSES_CODE.NEXTVAL, V_ROOM_CODE, C_CODE, V_PRO_ID, V_START_DATE, V_END_DATE); 
+    
+    COMMIT;
+    
+END;
+
+--○ 등록된 모든 과정 정보 출력 (과정명, 강의실, 과목명, 과목시작연월일, 끝연월일, 교재명, 교수자명) 
+CREATE OR REPLACE VIEW VIEW_COURSE_INFO 
+AS
+SELECT C1.NAME "과정명"
+     , C3.INFO "강의실"
+     , C8.NAME "과목명"
+     , C4.START_DATE "과목시작"
+     , C4.END_DATE "과목종료"
+     , C5.NAME "교재명"
+     , C6.NAME "교수자명"
+FROM COURSES C1, OP_COURSES C2, CLASSROOMS C3, OP_SUBJECTS C4, BOOKS C5, PROFESSORS C6, PROFESSOR_TEACHABLE_SUBJECTS C7, SUBJECTS C8
+WHERE C1.CODE = C2.COURSE_CODE(+)
+  AND C2.ROOM_CODE = C3.CODE(+)
+  AND C2.CODE = C4.OP_COURSE_CODE(+)
+  AND C4.BOOK_NUM = C5.NUM(+)
+  AND C2.PRO_ID = C6.ID(+)
+  AND C4.PTS_CODE = C7.CODE(+)
+  AND C7.SUB_CODE = C8.CODE(+);
+
+
+--○ 입력된 과정 수정(과정명, 강의실, 교수자, 과정기간) 기능   
+-- 1. 과정명 수정 
+CREATE OR REPLACE PROCEDURE PRC_CHANGE_COURSE_NAME
+( V_CODE        IN OP_COURSES.CODE%TYPE -- 변경하려는 개설 과정
+, V_NAME        IN COURSES.NAME%TYPE   -- 변경할 과정명
+)
+IS
+    CURSOR CUR_COMPARE
+    IS
+    SELECT NAME
+    FROM COURSES;
+    
+    COURSES_NAME         COURSES.NAME%TYPE;
+    FLAG                 NUMBER  := 0;
+    C_COURSES_CODE         COURSES.CODE%TYPE;
+    
+BEGIN
+
+    SELECT COURSE_CODE INTO C_COURSES_CODE
+    FROM OP_COURSES
+    WHERE CODE = V_CODE;
+
+    OPEN CUR_COMPARE;
+    
+    LOOP
+    
+        FETCH CUR_COMPARE INTO COURSES_NAME; -- COURSES 테이블에 있는 NAME
+        
+        IF (V_NAME = COURSES_NAME) -- 입력한 과정명과 동일한 이름의 과정명이 존재한다면...
+            THEN FLAG := 1;
+        END IF;
+        EXIT WHEN CUR_COMPARE%NOTFOUND;
+    
+    END LOOP;
+    
+    CLOSE CUR_COMPARE;
+    
+    IF (FLAG = 0) -- FLAG 가 0 일때, 즉 입력한 과정명과 동일한 이름의 과정명이 존재하지 않는다면...
+        THEN INSERT INTO COURSES(CODE, NAME) VALUES (SEQ_COURSES_CODE.NEXTVAL, V_NAME);
+             
+             SELECT CODE INTO C_COURSES_CODE
+             FROM COURSES
+             WHERE NAME = V_NAME;
+        
+             UPDATE OP_COURSES
+             SET COURSE_CODE = C_COURSES_CODE
+             WHERE CODE = V_CODE;
+    ELSIF (FLAG = 1)
+        THEN
+            SELECT CODE INTO C_COURSES_CODE
+            FROM COURSES
+            WHERE NAME = V_NAME;
+        
+            UPDATE OP_COURSES
+            SET COURSE_CODE = C_COURSES_CODE
+            WHERE CODE = V_CODE;
+    END IF;
+    
+     COMMIT;
+    
+END;
+
+
+-- 2. 강의실 수정 
+CREATE OR REPLACE PROCEDURE PRC_OP_COURSES_UPDATE_ROOM
+( V_OPC_CODE    IN OP_COURSES.CODE%TYPE
+, V_ROOM_CODE   IN CLASSROOMS.CODE%TYPE
+)
+IS
+    V_START_DATE    OP_COURSES.START_DATE%TYPE;
+    V_END_DATE      OP_COURSES.END_DATE%TYPE;
+    V_COUNT         NUMBER;
+    RESERVED_ROOM_ERROR EXCEPTION;
+    NOEXIST_ROOM_ERROR EXCEPTION;
+    
+    C_ROOMCODE  CLASSROOMS.CODE%TYPE;
+    FLAG    NUMBER :=0;
+    USER_DEFINE_ERROR       EXCEPTION;
+    
+    CURSOR CUR_ROOMCODE
+    IS
+    SELECT CODE
+    FROM CLASSROOMS;
+    
+BEGIN
+    
+    -- 강의 번호가 없을 때
+
+    OPEN CUR_ROOMCODE;
+    
+    LOOP
+        FETCH CUR_ROOMCODE INTO C_ROOMCODE;
+        
+        IF (V_ROOM_CODE = C_ROOMCODE)
+            THEN FLAG :=1;
+        END IF;
+        
+        EXIT WHEN CUR_ROOMCODE%NOTFOUND;
+        
+    END LOOP;
+    
+    CLOSE CUR_ROOMCODE;
+    
+    IF (FLAG = 0)
+        THEN RAISE NOEXIST_ROOM_ERROR;
+    END IF;
+    
+            
+    -- 강의기간이 겹칠경우
+
+    SELECT START_DATE, END_DATE INTO V_START_DATE, V_END_DATE
+    FROM OP_COURSES
+    WHERE CODE = V_OPC_CODE;
+    
+    SELECT COUNT(*) INTO V_COUNT
+    FROM OP_COURSES
+    WHERE ROOM_CODE = V_ROOM_CODE 
+      AND ( START_DATE <= V_END_DATE OR END_DATE >= V_START_DATE );
+
+    IF (V_COUNT > 0)
+        THEN RAISE RESERVED_ROOM_ERROR;
+    END IF;
+    
+    UPDATE OP_COURSES
+    SET ROOM_CODE = V_ROOM_CODE
+    WHERE CODE = V_OPC_CODE;
+    
+    COMMIT;
+    
+EXCEPTION
+    WHEN RESERVED_ROOM_ERROR THEN RAISE_APPLICATION_ERROR(-20008, '과정기간 중 교실이 이미 예약된 상태입니다.'); ROLLBACK;
+    WHEN NOEXIST_ROOM_ERROR THEN RAISE_APPLICATION_ERROR(-20009, '해당 강의실 번호가 존재하지 않습니다.'); ROLLBACK;
+    --WHEN OTHERS THEN ROLLBACK;
+END;
+
+
+-- 3. 과정 담당 교수자 수정  - 이 과정을 참조하는 개설과목이 있다면 그 과목들을 가르칠 수 있는 교수자로만 수정가능
+CREATE OR REPLACE PROCEDURE CHANGE_PRO
+( V_CODE       IN OP_COURSES.CODE%TYPE
+, V_PRO_ID     IN OP_COURSES.PRO_ID%TYPE
+)
+IS 
+    V_CODE_SU        NUMBER;
+    P_CODE_SU        NUMBER;
+    C_PTS_CODE       PROFESSOR_TEACHABLE_SUBJECTS.CODE%TYPE;
+    C2_PTS_CODE      PROFESSOR_TEACHABLE_SUBJECTS.CODE%TYPE;
+    C_SUB_CODE       PROFESSOR_TEACHABLE_SUBJECTS.SUB_CODE%TYPE;
+    C2_SUB_CODE      PROFESSOR_TEACHABLE_SUBJECTS.SUB_CODE%TYPE;
+    FLAG             NUMBER     := 0;            
+    
+    CURSOR CUR_COMPARE(A_CODE OP_SUBJECTS.OP_COURSE_CODE%TYPE)
+    IS
+    SELECT PTS_CODE
+    FROM OP_SUBJECTS OS
+    WHERE OS.OP_COURSE_CODE= A_CODE;
+    
+    CURSOR CUR_COMPARE2(A_PRO_ID PROFESSOR_TEACHABLE_SUBJECTS.PRO_ID%TYPE)
+    IS
+    SELECT CODE
+    FROM PROFESSOR_TEACHABLE_SUBJECTS
+    WHERE PRO_ID= A_PRO_ID;--A_CODE;
+    
+    USER_DEFINE_ERROR    EXCEPTION;
+BEGIN
+    
+    SELECT COUNT(*) INTO V_CODE_SU
+    FROM OP_SUBJECTS
+    WHERE OP_COURSE_CODE = V_CODE; -- 내가 입력한 코스가 가지고 있는 과목 수
+   
+    IF (V_CODE_SU > P_CODE_SU)
+        THEN RAISE USER_DEFINE_ERROR;
+    
+    ELSE -- V_CODE_SU == P_CODE_SU 이거나 V_CODE_SU < P_CODE_SU 일 때
+    
+        OPEN CUR_COMPARE(V_CODE);
+        LOOP
+            
+            FETCH CUR_COMPARE INTO C_PTS_CODE;
+            
+            SELECT SUB_CODE INTO C_SUB_CODE
+            FROM PROFESSOR_TEACHABLE_SUBJECTS
+            WHERE CODE = C_PTS_CODE;
+                        
+            
+            SELECT CODE INTO C2_PTS_CODE
+            FROM PROFESSOR_TEACHABLE_SUBJECTS
+            WHERE SUB_CODE = C_SUB_CODE AND PRO_ID = V_PRO_ID;
+ 
+            UPDATE OP_SUBJECTS
+            SET PTS_CODE = C2_PTS_CODE
+            WHERE OP_COURSE_CODE = V_CODE AND PTS_CODE = C_PTS_CODE;
+                      
+            
+            EXIT WHEN CUR_COMPARE%NOTFOUND;
+        
+        END LOOP;
+        
+        CLOSE CUR_COMPARE;
+    
+        UPDATE OP_COURSES
+        SET PRO_ID = V_PRO_ID
+        WHERE CODE = V_CODE;
+    END IF;
+    
+    COMMIT;
+    
+    EXCEPTION 
+        WHEN USER_DEFINE_ERROR 
+            THEN RAISE_APPLICATION_ERROR(-20010, '해당 교수번호는 과정 개설이 불가능합니다. (교수가능과목 부족)');
+                 ROLLBACK;
+    
+END;
+
+--4. 과정 기간 변경 (과정에 개설된 과목 없으면 그냥 가능, 개설 과목 있으면 불가능 )
+CREATE OR REPLACE PROCEDURE PRC_OP_COURSE_CHANGE_DATE
+(V_CODE         IN  OP_COURSES.CODE%TYPE
+,V_START_DATE   IN  OP_COURSES.START_DATE%TYPE
+,V_END_DATE     IN  OP_COURSES.END_DATE%TYPE)
+IS
+    V_COUNT NUMBER;
+    V_FLAG  NUMBER;
+    
+    USER_DEFINE_ERROR   EXCEPTION;
+BEGIN
+    
+    -- 변경할 과정을 참조하는 개설과목이 있을 경우 기간변경 불가능 
+    SELECT COUNT(*) INTO V_COUNT
+    FROM OP_SUBJECTS
+    WHERE OP_COURSE_CODE = V_CODE;
+    
+    IF(V_COUNT>0)
+        THEN RAISE USER_DEFINE_ERROR ;
+    END IF;
+    
+    UPDATE OP_COURSES
+    SET START_DATE = V_START_DATE , END_DATE = V_END_DATE
+    WHERE CODE = V_CODE;
+    
+    COMMIT;
+    
+    EXCEPTION
+        WHEN USER_DEFINE_ERROR    
+        THEN RAISE_APPLICATION_ERROR(-20011, '해당 과정은 개설과목이 존재합니다.');
+        ROLLBACK;
+
+END;
+
+--○ 과정 삭제 기능 
+CREATE OR REPLACE PROCEDURE PRC_OP_COURSE_DEL
+( V_CODE    IN  OP_COURSES.CODE%TYPE)
+IS
+BEGIN
+    DELETE
+    FROM OP_COURSES
+    WHERE CODE = V_CODE;
+    
+    COMMIT;
+    
+END;
+
+--Ⅴ. 과목 관리 기능 구현
+
+--○ 과정 내 여러 과목 등록 (= 과목개설 OP_SUBJECTS) (과정명, 과목명, 과목기간, 교재명, 교수자명)
+CREATE OR REPLACE PROCEDURE PRC_SUB_OPEN 
+( V_OP_COURSE_CODE IN  OP_COURSES.CODE%TYPE
+, V_START_DATE     IN  OP_SUBJECTS.START_DATE%TYPE
+, V_END_DATE       IN  OP_SUBJECTS.END_DATE%TYPE
+, V_BOOK_NUM       IN  OP_SUBJECTS.BOOK_NUM%TYPE
+, V_PTS_CODE       IN  PROFESSOR_TEACHABLE_SUBJECTS.CODE%TYPE
+)
+IS
+-- 변수 선언
+C_OP_COURSE_CODE   OP_COURSES.CODE%TYPE;
+C_PTS_CODE         PROFESSOR_TEACHABLE_SUBJECTS.CODE%TYPE;
+C_BOOK_NUM         OP_SUBJECTS.BOOK_NUM%TYPE;
+
+C_START_DATE        OP_COURSES.START_DATE%TYPE;
+C_END_DATE          OP_COURSES.END_DATE%TYPE;
+
+-- 카운트 변수 선언 
+V_COUNT NUMBER;
+
+-- 예외 변수 선언
+SUB_OPEN_CERROR   EXCEPTION;
+SUB_OPEN_SERROR   EXCEPTION;
+SUB_OPEN_BERROR   EXCEPTION;
+SUB_OPEN_DERROR   EXCEPTION;
+
+BEGIN
+    
+    --선언한 변수에 값 입력
+    -- 과정명이 없거나 과목명이 없거나 교재명이 없거나 교수자명이 없으면 예외처리 - 등록 먼저하세요 
+    
+    -- 과정명이 없을 경우 
+    SELECT COUNT(*) INTO V_COUNT
+    FROM OP_COURSES
+    WHERE CODE = V_OP_COURSE_CODE;
+    
+    IF(V_COUNT = 0)
+        THEN RAISE SUB_OPEN_CERROR;
+    END IF;
+    
+    -- 과목명과 교수명이 없을 경우 
+    SELECT COUNT(*) INTO V_COUNT
+    FROM PROFESSOR_TEACHABLE_SUBJECTS
+    WHERE CODE =  V_PTS_CODE;
+    
+    IF(V_COUNT = 0)
+        THEN RAISE SUB_OPEN_SERROR;
+    END IF;
+    
+     -- 교재명이 없을 경우 
+    SELECT COUNT(*) INTO V_COUNT
+    FROM BOOKS
+    WHERE NUM = V_BOOK_NUM;
+    
+    IF(V_COUNT = 0)
+        THEN RAISE SUB_OPEN_BERROR;
+    END IF;
+    
+    -- 개설하려는 과목의 기간이 과정의 기간 내에 존재해야 한다.
+    SELECT START_DATE, END_DATE INTO C_START_DATE, C_END_DATE
+    FROM OP_COURSES
+    WHERE CODE = V_OP_COURSE_CODE;
+    
+    IF(C_START_DATE <= V_START_DATE AND  V_END_DATE <= C_END_DATE)
+        THEN  INSERT INTO OP_SUBJECTS(NUM, BOOK_NUM, PTS_CODE, OP_COURSE_CODE, START_DATE, END_DATE)
+              VALUES(SEQ_OP_SUBJECTS_CODE.NEXTVAL, V_BOOK_NUM, V_PTS_CODE, V_OP_COURSE_CODE, V_START_DATE, V_END_DATE);
+    ELSE RAISE SUB_OPEN_DERROR;          
+    END IF;
+
+    COMMIT;
+    
+    EXCEPTION
+        WHEN SUB_OPEN_CERROR THEN RAISE_APPLICATION_ERROR(-20012,'등록되지 않은 과정입니다.');
+                    ROLLBACK;
+        WHEN SUB_OPEN_SERROR THEN RAISE_APPLICATION_ERROR(-20013,'등록되지 않은 과목입니다.');
+                    ROLLBACK;
+        WHEN SUB_OPEN_BERROR THEN RAISE_APPLICATION_ERROR(-20024,'등록되지 않은 교재입니다.');
+                    ROLLBACK;
+        WHEN SUB_OPEN_DERROR THEN RAISE_APPLICATION_ERROR(-20015,'기간을 확인해주세요.');
+                    ROLLBACK;            
+        
+END; 
+ 
+ 
+--○ 교수자 강의 가능 과목(PROFESSOR_TEACHABLE_SUBJECTS) 입력 기능
+--  (요구분석서 상 - 과목에 교수자 미리 배정하는 기능) 
+CREATE OR REPLACE PROCEDURE ALREADY_BAEJUNG
+( V_PRO_ID    IN PROFESSORS.ID%TYPE
+, V_SUB_CODE  IN SUBJECTS.CODE%TYPE
+)
+IS
+    USER_DEFINE_ERROR   EXCEPTION;
+BEGIN  
+
+    IF(V_PRO_ID IS NULL OR V_SUB_CODE IS NULL)
+        THEN RAISE USER_DEFINE_ERROR;
+    END IF;
+    
+    
+    INSERT INTO PROFESSOR_TEACHABLE_SUBJECTS(CODE,PRO_ID, SUB_CODE)
+           VALUES(SEQ_PTS_CODE.NEXTVAL,V_PRO_ID, V_SUB_CODE);
+    
+    COMMIT;
+    
+    EXCEPTION
+        WHEN USER_DEFINE_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20016, '빈칸을 채워주세요');
+                ROLLBACK;
+        WHEN OTHERS
+            THEN ROLLBACK;      
+
+END;
+
+--○ 교수자 강의 가능 과목(PROFESSOR_TEACHABLE_SUBJECTS) 삭제 기능 
+CREATE OR REPLACE PROCEDURE PRC_PTS_DELETE
+( V_PTS_CODE    IN PROFESSOR_TEACHABLE_SUBJECTS.CODE%TYPE )
+IS 
+    V_COUNT     NUMBER;
+    USER_DEFINE_ERROR   EXCEPTION;
+BEGIN
+    SELECT COUNT(*) INTO V_COUNT
+    FROM PROFESSOR_TEACHABLE_SUBJECTS
+    WHERE CODE = V_PTS_CODE;
+    
+    IF (V_COUNT = 0)
+        THEN RAISE USER_DEFINE_ERROR ;
+    END IF;
+    
+    DELETE
+    FROM PROFESSOR_TEACHABLE_SUBJECTS
+    WHERE CODE = V_PTS_CODE;
+    
+    COMMIT;
+    
+    EXCEPTION
+        WHEN USER_DEFINE_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20017, '해당 번호가 존재하지 않습니다.');
+             ROLLBACK;
+        WHEN OTHERS
+            THEN ROLLBACK;      
+END;
+
+
+-- ○ 모든 등록된 과목의 정보 출력 뷰(과정명,강의실, 과목명, 과목기간, 교재명, 교수자명)
+CREATE OR REPLACE VIEW VIEW_SUBJECT_INFO
+AS
+SELECT S1.NAME "과정명"
+     , S3.INFO "강의실"
+     , S8.NAME "과목명"
+     , S4.START_DATE "과목시작"
+     , S4.END_DATE "과목종료"
+     , S6.NAME "교재명"
+     , S5.NAME "교수자명"
+FROM COURSES S1, OP_COURSES S2, CLASSROOMS S3, OP_SUBJECTS S4, PROFESSORS S5, BOOKS S6, PROFESSOR_TEACHABLE_SUBJECTS S7, SUBJECTS S8
+WHERE S1.CODE = S2.COURSE_CODE(+)
+  AND S2.ROOM_CODE = S3.CODE(+)
+  AND S2.CODE = S4.OP_COURSE_CODE(+)
+  AND S2.PRO_ID = S5.ID(+)
+  AND S4.BOOK_NUM = S6.NUM(+)
+  AND S4.PTS_CODE = S7.CODE
+  AND S5.ID = S7.PRO_ID(+)
+  AND S7.SUB_CODE = S8.CODE(+);
+  
+
+--○ 입력된 개설 과목 정보 수정(과목기간, 교수자, 교재명), 삭제 
+                                        
+--1. 과목 기간 수정
+CREATE OR REPLACE PROCEDURE PRC_OP_SUBJECTS_UPDATE_DATE
+( V_OPS_NUM     IN OP_SUBJECTS.NUM%TYPE
+, V_START_DATE  IN OP_SUBJECTS.START_DATE%TYPE
+, V_END_DATE    IN OP_SUBJECTS.END_DATE%TYPE
+)
+IS
+    V_C_START_DATE  OP_COURSES.START_DATE%TYPE;
+    V_C_END_DATE    OP_COURSES.END_DATE%TYPE;
+    USER_DEFINE_ERROR   EXCEPTION;
+BEGIN
+    IF (V_START_DATE > V_END_DATE)
+        THEN RAISE USER_DEFINE_ERROR;
+    END IF;
+
+    SELECT START_DATE, END_DATE INTO V_C_START_DATE, V_C_END_DATE
+    FROM OP_COURSES
+    WHERE CODE = (SELECT OP_COURSE_CODE
+                  FROM OP_SUBJECTS
+                  WHERE NUM = V_OPS_NUM);
+                  
+                  
+    IF (V_C_START_DATE > V_START_DATE OR V_C_END_DATE < V_END_DATE)
+        THEN RAISE USER_DEFINE_ERROR;
+    END IF;
+    
+    UPDATE OP_SUBJECTS
+    SET START_DATE = V_START_DATE, END_DATE = V_END_DATE
+    WHERE NUM = V_OPS_NUM;
+    
+    COMMIT;
+EXCEPTION
+    WHEN USER_DEFINE_ERROR 
+        THEN RAISE_APPLICATION_ERROR(-20018, '입력한 기간이 유효하지 않습니다.');
+        ROLLBACK;
+END;
+
+
+--2. 필요한 경우 개설과목 담당 교수자 변경 기능 
+--  (한 과정 내의 특정과목만 다른 교수자가 가르치게 되었을 경우를 고려) 
+CREATE OR REPLACE PROCEDURE PRC_OP_SUBJECTS_UPDATE_PROF
+( V_OPS_NUM     IN OP_SUBJECTS.NUM%TYPE
+, V_PRO_ID      IN PROFESSORS.ID%TYPE
+)
+IS
+    
+    V_COUNT     NUMBER;
+    V_PTS_CODE  PROFESSOR_TEACHABLE_SUBJECTS.CODE%TYPE;
+    V_SUB_CODE  SUBJECTS.CODE%TYPE;
+    
+    USER_DEFINE_ERROR   EXCEPTION;
+    
+BEGIN
+
+    -- 선언한 변수에 값 할당 
+    SELECT COUNT(*) INTO V_COUNT
+    FROM PROFESSOR_TEACHABLE_SUBJECTS
+    WHERE CODE = (SELECT PTS_CODE
+                  FROM OP_SUBJECTS
+                  WHERE NUM = V_OPS_NUM);
+
+    -- PTS 코드가 없는 경우 
+    IF(V_COUNT>0)
+        THEN RAISE USER_DEFINE_ERROR;
+    END IF;
+    
+    
+    SELECT SUB_CODE INTO V_SUB_CODE
+    FROM PROFESSOR_TEACHABLE_SUBJECTS
+    WHERE CODE = (SELECT PTS_CODE
+                  FROM OP_SUBJECTS
+                  WHERE NUM = V_OPS_NUM);
+
+    SELECT CODE INTO V_PTS_CODE
+    FROM PROFESSOR_TEACHABLE_SUBJECTS
+    WHERE PRO_ID = V_PRO_ID AND SUB_CODE = V_SUB_CODE;
+    
+  
+    UPDATE OP_SUBJECTS
+    SET PTS_CODE = V_PTS_CODE
+    WHERE NUM = V_OPS_NUM;
+    
+    COMMIT;
+       
+    EXCEPTION
+        WHEN USER_DEFINE_ERROR
+        THEN RAISE_APPLICATION_ERROR(-20019, '해당 교수자가 강의할 수 없는 과목입니다.');
+                ROLLBACK;
+ 
+END;
+
+
+-- 3. 교재명 수정
+CREATE OR REPLACE PROCEDURE PRC_OP_SUBJECTS_UPDATE_BOOK
+( V_OPS_NUM     IN OP_SUBJECTS.NUM%TYPE
+, V_BOOK_NAME   IN BOOKS.NAME%TYPE
+)
+IS
+    V_BOOK_NUM  BOOKS.NUM%TYPE;
+BEGIN
+    
+    BEGIN
+        SELECT NUM INTO V_BOOK_NUM
+        FROM BOOKS
+        WHERE NAME = V_BOOK_NAME;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN V_BOOK_NUM := SEQ_BOOKS.NEXTVAL;
+                                INSERT INTO BOOKS VALUES(V_BOOK_NUM, V_BOOK_NAME);
+    END;
+    
+    UPDATE OP_SUBJECTS
+    SET BOOK_NUM = V_BOOK_NUM
+    WHERE NUM = V_OPS_NUM;
+    
+    COMMIT;
+END;
+
+-- 개설 과목 삭제 
+CREATE OR REPLACE PROCEDURE OP_SUBJECTS_DELETE
+( V_OPS_NUM IN OP_SUBJECTS.NUM%TYPE
+)
+IS
+BEGIN
+    DELETE
+    FROM OP_SUBJECTS
+    WHERE NUM = V_OPS_NUM;
+    
+    COMMIT;
+END;
+
+--Ⅵ. 학생 관리 기능 구현
+--○  한 개 과정당 여러 명의 학생 등록 기능 (입력정보 : 학생명, 주민등록번호 뒷자리) 
+CREATE OR REPLACE PROCEDURE PRC_INSERT_STUDENT
+( V_STUDENT_NAME    IN STUDENTS.NAME%TYPE
+, V_STUDENT_SSN     IN STUDENTS.SSN%TYPE
+, V_OP_COURSES_CODE IN OP_COURSES.CODE%TYPE
+)
+IS
+    V_STUDENT_ID        STUDENTS.ID%TYPE;
+    V_STUDENT_PW        STUDENTS.PW%TYPE;
+    
+    SSN_LEGNTH_ERROR EXCEPTION;
+BEGIN
+    V_STUDENT_PW := V_STUDENT_SSN;
+    
+    BEGIN
+        IF(LENGTH(V_STUDENT_SSN) <= 6 OR LENGTH(V_STUDENT_SSN) >=8)
+            THEN RAISE SSN_LEGNTH_ERROR;
+        END IF;
+    
+        SELECT ID INTO V_STUDENT_ID  
+        FROM STUDENTS
+        WHERE NAME = V_STUDENT_NAME
+          AND SSN = V_STUDENT_SSN;
+    EXCEPTION
+        WHEN SSN_LEGNTH_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20020, '주민번호 길이가 맞지 않습니다.');
+        WHEN OTHERS THEN V_STUDENT_ID := LPAD(SEQ_STUDENT_ID.NEXTVAL, 6, '0');
+             INSERT INTO STUDENTS(ID, NAME, PW, SSN)
+             VALUES(V_STUDENT_ID, V_STUDENT_NAME, V_STUDENT_SSN, V_STUDENT_SSN);    
+    END;
+    
+    COMMIT;
+    
+    INSERT INTO STUDENT_COURSES_LISTS(NUM, STUDENT_ID, OP_COURSE_CODE)
+    VALUES(SEQ_SCL_NUM.NEXTVAL, V_STUDENT_ID, V_OP_COURSES_CODE);
+    
+END;
+
+
+--○ 수강과정별 수강학생 명단 확인(필요데이터: 개설과목코드)
+CREATE OR REPLACE PROCEDURE PRC_STUDENTS_IN_COURSE
+( V_OPC_CODE    IN  OP_COURSES.CODE%TYPE
+, V_OUT         OUT SYS_REFCURSOR
+)
+IS
+BEGIN
+    OPEN V_OUT FOR
+        SELECT ST.ID, ST.NAME
+        FROM STUDENT_COURSES_LISTS SCL, NON_PASS NP, STUDENTS ST
+        WHERE SCL.OP_COURSE_CODE = V_OPC_CODE
+          AND NP.SCL_NUM(+) = SCL.NUM
+          AND NP.NUM IS NULL
+          AND ST.ID = SCL.STUDENT_ID;
+END;
+
+
+--○ 모든 학생의 정보 출력 뷰(학생명, 과정명, 수강과목, 수강과목 총점 + 중도탈락여부)
+CREATE OR REPLACE VIEW VIEW_STUDENT_INFO
+AS
+SELECT S1.NAME "학생이름"
+     , S4.NAME "과정명"
+     , S7.NAME "수강과목"
+     , (S8.PRESENCE*(S5.PRE_RATE/100) + S8.PRACTICE*(S5.PRAC_RATE/100) + S8.WRITING*(S5.WRITE_RATE/100)) "수강과목총점"
+     , TO_CHAR(S9.NP_DATE, 'YYYY/MM/DD') "중도탈락날짜"
+FROM STUDENTS S1
+   , STUDENT_COURSES_LISTS S2
+   , OP_COURSES S3
+   , COURSES S4
+   , OP_SUBJECTS S5
+   , PROFESSOR_TEACHABLE_SUBJECTS S6
+   , SUBJECTS S7
+   , SCORES S8
+   , NON_PASS S9
+WHERE S1.ID = S2.STUDENT_ID(+)
+  AND S3.CODE(+) = S2.OP_COURSE_CODE
+  AND S4.CODE(+) = S3.COURSE_CODE
+  AND S3.CODE = S5.OP_COURSE_CODE(+)
+  AND S6.CODE(+) = S5.PTS_CODE
+  AND S6.SUB_CODE = S7.CODE(+)
+  AND S2.NUM = S8.SCL_NUM(+)
+  AND S2.NUM = S9.SCL_NUM(+)
+  AND S8.OP_SUB_NUM = S5.NUM;
+  
+--○ 입력된 학생 정보 수정(학생명, PW) , 삭제 
+-- 1. 학생 정보 수정
+CREATE OR REPLACE PROCEDURE STUDENT_UPDATE
+( V_STUDENT_ID      IN STUDENTS.ID%TYPE
+, V_STUDENT_NAME    IN STUDENTS.NAME%TYPE
+, V_STUDENT_PW      IN STUDENTS.PW%TYPE
+)
+IS
+BEGIN
+    UPDATE STUDENTS
+    SET NAME = V_STUDENT_NAME
+      , PW = V_STUDENT_PW
+    WHERE ID = V_STUDENT_ID;
+    
+    COMMIT;
+END;
+
+-- 2. 학생 정보 삭제
+CREATE OR REPLACE PROCEDURE STUDENT_DELETE
+( V_STUDENT_ID      IN STUDENTS.ID%TYPE
+)
+IS
+BEGIN
+    DELETE
+    FROM STUDENTS
+    WHERE ID = V_STUDENT_ID;
+    
+    COMMIT;
+END;
+
+-- Ⅶ. 성적 관리 기능 구현
+-- 학생 측 요구분석, 교수자측 요구분석과 중복됨
+
+-- [ 사용자측 요구분석(교수자) ] -----------------------------------------------------------------------------------------------
+
+-- Ⅰ.로그인 기능 구현
+-- ○ 교수자 로그인 기능
+CREATE OR REPLACE FUNCTION FN_PRO_LOGIN
+(V_ID IN PROFESSORS.ID%TYPE 
+,V_PW IN PROFESSORS.PW%TYPE
+)
+RETURN NUMBER
+IS
+-- 변수 선언
+V_PW2    ADMIN.PW%TYPE;
+V_FLAG   NUMBER := 0;
+-- 에러 변수 선언
+USER_LOGIN_ERROR    EXCEPTION;
+BEGIN
+-- 선언한 변수에 값 저장     
+    BEGIN
+        SELECT PW INTO V_PW2
+        FROM PROFESSORS
+        WHERE ID = V_ID;
+    EXCEPTION
+        WHEN OTHERS THEN RAISE USER_LOGIN_ERROR;  
+    END;
+    -- 입력한 패스워드가 교수자의 패스워드가 같으면 1 반환
+    IF(V_PW = V_PW2)
+        THEN V_FLAG := 1;
+        ELSE V_FLAG := 2;
+    END IF;
+    
+        
+    RETURN V_FLAG;
+    
+    EXCEPTION 
+       WHEN USER_LOGIN_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20021, '해당 아이디가 존재하지 않습니다.');
+            ROLLBACK;
+END;
+
+
+--Ⅱ. 성적 입력 기능 구현 
+-- ○ 각 개설과목 배점 결정  - 비율로 
+CREATE OR REPLACE PROCEDURE OP_SUBJECTS_RATE_UPDATE
+( V_OP_SUB_NUM  IN OP_SUBJECTS.NUM%TYPE
+, V_PRE_RATE    IN OP_SUBJECTS.PRE_RATE%TYPE
+, V_PRAC_RATE   IN OP_SUBJECTS.PRAC_RATE%TYPE
+, V_WRITE_RATE  IN OP_SUBJECTS.WRITE_RATE%TYPE
+)
+IS
+BEGIN
+
+    UPDATE OP_SUBJECTS
+    SET PRE_RATE = V_PRE_RATE, PRAC_RATE = V_PRAC_RATE, WRITE_RATE = V_WRITE_RATE
+    WHERE NUM = V_OP_SUB_NUM;
+    
+    COMMIT;
+    
+EXCEPTION
+    WHEN OTHERS THEN RAISE_APPLICATION_ERROR(-20022, '배점을 올바르게 입력해주세요.'); 
+                ROLLBACK;
+END;
+
+
+--○ 각 과목별 성적 처리(출결/실기/필기) 기능(입력 / 수정)
+-- 함수: (학생아이디, 개설과목번호) -> 과정등록번호
+CREATE OR REPLACE FUNCTION FN_FIND_SCL_NUM
+( V_STD_ID  STUDENTS.ID%TYPE
+, V_OPS_NUM OP_SUBJECTS.NUM%TYPE
+)
+RETURN STUDENT_COURSES_LISTS.NUM%TYPE
+IS
+    V_SCL_NUM   STUDENT_COURSES_LISTS.NUM%TYPE;
+    V_OPC_CODE  OP_COURSES.CODE%TYPE;
+BEGIN
+    SELECT OP_COURSE_CODE INTO V_OPC_CODE
+    FROM OP_SUBJECTS
+    WHERE NUM = V_OPS_NUM;
+
+    SELECT NUM INTO V_SCL_NUM
+    FROM STUDENT_COURSES_LISTS
+    WHERE STUDENT_ID = V_STD_ID
+      AND OP_COURSE_CODE = V_OPC_CODE;
+
+    RETURN V_SCL_NUM;
+    
+     COMMIT;
+    
+EXCEPTION
+    WHEN OTHERS THEN RETURN NULL;
+END;
+
+-- 성적 입력/수정 시 적용되는 트리거
+CREATE OR REPLACE TRIGGER TRG_SCORES_INSERT_UPDATE
+        BEFORE
+        INSERT OR UPDATE ON SCORES
+        FOR EACH ROW
+DECLARE
+    V_START_DATE    OP_SUBJECTS.START_DATE%TYPE;
+    V_END_DATE      OP_SUBJECTS.END_DATE%TYPE;
+    V_COUNT         NUMBER;
+BEGIN
+    IF (:NEW.PRESENCE < 0 OR :NEW.PRACTICE < 0 OR :NEW.WRITING < 0) THEN 
+        RAISE_APPLICATION_ERROR(-20023, '0보다 작은 점수는 입력할 수 없습니다.');
+        ROLLBACK;
+    END IF;
+    
+    IF(INSERTING) THEN
+        SELECT START_DATE, END_DATE INTO V_START_DATE, V_END_DATE
+        FROM OP_SUBJECTS
+        WHERE NUM = :NEW.OP_SUB_NUM;
+        
+        IF (V_START_DATE > SYSDATE) THEN
+            RAISE_APPLICATION_ERROR(-20024, '강의진행이 되지 않은 과목의 성적은 입력할 수 없습니다.');
+            ROLLBACK;
+        END IF;
+        
+        SELECT COUNT(*) INTO V_COUNT
+        FROM NON_PASS
+        WHERE SCL_NUM = :NEW.SCL_NUM AND NP_DATE < V_END_DATE;
+        
+        IF (V_COUNT > 0) THEN
+            RAISE_APPLICATION_ERROR(-20025, '중도탈락한 학생의 성적을 입력할 수 없습니다.');
+            ROLLBACK;
+        END IF;
+        
+    END IF;
+END;
+
+-- 성적 입력/수정 시 사용하는 프로시저
+CREATE OR REPLACE PROCEDURE PRC_SCORES_INSERT_OR_UPDATE
+( V_STD_ID      IN STUDENTS.ID%TYPE
+, V_OPS_NUM     IN OP_SUBJECTS.NUM%TYPE
+, V_PRESENCE    IN SCORES.PRESENCE%TYPE
+, V_WRITING     IN SCORES.WRITING%TYPE
+, V_PRACTICE    IN SCORES.PRACTICE%TYPE
+)
+IS
+    V_SCL_NUM       STUDENT_COURSES_LISTS.NUM%TYPE;
+    V_SCORES_NUM    SCORES.NUM%TYPE;
+    USER_DEFINE_ERROR   EXCEPTION;
+BEGIN
+
+    V_SCL_NUM := FN_FIND_SCL_NUM(V_STD_ID, V_OPS_NUM);
+
+    IF(V_SCL_NUM IS NULL) THEN
+        RAISE USER_DEFINE_ERROR;
+    END IF;
+
+    SELECT NUM INTO V_SCORES_NUM
+    FROM SCORES
+    WHERE SCL_NUM = V_SCL_NUM AND OP_SUB_NUM = V_OPS_NUM;
+    
+    UPDATE SCORES
+    SET PRESENCE = V_PRESENCE, WRITING = v_WRITING, PRACTICE = V_PRACTICE
+    WHERE NUM = V_SCORES_NUM;
+
+    COMMIT;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        INSERT INTO SCORES (NUM, SCL_NUM, OP_SUB_NUM, PRESENCE, WRITING, PRACTICE)
+        VALUES(SEQ_SCORES.NEXTVAL, V_SCL_NUM, V_OPS_NUM, V_PRESENCE, V_WRITING, V_PRACTICE);
+        COMMIT;
+    WHEN USER_DEFINE_ERROR THEN RAISE_APPLICATION_ERROR(-20026, '해당 과목이 포함된 과정에 등록하지 않은 학생입니다.');
+                           ROLLBACK;
+    WHEN OTHERS THEN ROLLBACK;
+END;
+
+-- 성적 삭제하는 프로시저
+CREATE OR REPLACE PROCEDURE PRC_SCORES_DELETE
+( V_STD_ID      IN STUDENTS.ID%TYPE
+, V_OPS_NUM     IN OP_SUBJECTS.NUM%TYPE
+)
+IS
+    V_SCL_NUM       STUDENT_COURSES_LISTS.NUM%TYPE;
+    NO_SCL_ERROR    EXCEPTION;
+BEGIN
+    V_SCL_NUM := FN_FIND_SCL_NUM(V_STD_ID, V_OPS_NUM);
+
+    IF (V_SCL_NUM IS NULL)
+        THEN RAISE NO_SCL_ERROR;
+    END IF;
+
+    DELETE FROM SCORES
+    WHERE SCL_NUM = V_SCL_NUM AND OP_SUB_NUM = V_OPS_NUM;
+    
+    COMMIT;
+    
+EXCEPTION
+    WHEN OTHERS THEN ROLLBACK;
+END;
+
+
+--Ⅲ 성적 출력 기능 구현
+
+--○ 자신이 강의한 과목의 성적 출력(과목명, 과목기간, 교재명, 학생명, 출결점수, 실기점수, 필기점수, 총점, 등수, 중도탈락 여부) 
+CREATE OR REPLACE PROCEDURE PRC_STUDENTS_IN_COURSE
+( V_PRO_ID      IN  PROFESSORS.ID%TYPE
+, V_OUT         OUT SYS_REFCURSOR
+)
+IS
+BEGIN
+    OPEN V_OUT FOR
+        SELECT T.*, RANK() OVER(PARTITION BY T.SUBJECT_NUM ORDER BY T.TOTAL DESC) "RANK"
+        FROM
+        (
+            SELECT OPS.NUM "SUBJECT_NUM"
+                 , SUBJ.NAME "SUBJECT_NAME"
+                 , OPS.START_DATE
+                 , OPS.END_DATE
+                 , B.NAME "BOOK_NAME"
+                 , STD.ID "STUDENT_ID"
+                 , STD.NAME "STUDENT_NAME"
+                 , SC.PRESENCE * OPS.PRE_RATE / 100 "PRESENCE"  -- 배점 비율로 연산
+                 , SC.WRITING * OPS.WRITE_RATE / 100 "WRITING"
+                 , SC.PRACTICE * OPS.PRAC_RATE / 100 "PRACTICE"
+                 , (SC.PRESENCE * OPS.PRE_RATE + SC.WRITING * OPS.WRITE_RATE + SC.PRACTICE * OPS.PRAC_RATE) / 100 "TOTAL"
+                 , NVL2(NP.NUM, 'T', 'F') "NON_PASS"
+            FROM SCORES SC
+               , STUDENT_COURSES_LISTS SCL
+               , STUDENTS STD
+               , OP_SUBJECTS OPS
+               , BOOKS B
+               , PROFESSOR_TEACHABLE_SUBJECTS PTS
+               , NON_PASS NP
+               , SUBJECTS SUBJ
+            WHERE SC.SCL_NUM = SCL.NUM
+              AND SCL.STUDENT_ID = STD.ID
+              AND OPS.NUM = SC.OP_SUB_NUM
+              AND B.NUM = OPS.BOOK_NUM
+              AND PTS.CODE = OPS.PTS_CODE
+              AND PTS.PRO_ID = V_PRO_ID
+              AND NP.SCL_NUM(+) = SCL.NUM
+              AND (NP.NP_DATE >= OPS.END_DATE OR NP.NUM IS NULL)
+              AND SUBJ.CODE = PTS.SUB_CODE
+        ) T;
+END;
+
+
+--[ 사용자측 요구분석(학생) ]---------------------------------------------------------------------------------------------------
+
+--Ⅰ. 로그인 기능 구현
+-- ○ 학생로그인
+CREATE OR REPLACE FUNCTION FN_STU_LOGIN
+(V_ID IN STUDENTS.ID%TYPE 
+,V_PW IN STUDENTS.PW%TYPE
+)
+RETURN NUMBER
+IS
+-- 변수 선언
+V_COUNT NUMBER;
+V_PW2   STUDENTS.PW%TYPE;
+V_FLAG  NUMBER := 0;
+-- 에러 변수 선언
+USER_LOGIN_ERROR    EXCEPTION;
+BEGIN
+     
+-- 선언한 변수에 값 저장
+    BEGIN
+        SELECT PW INTO V_PW2
+        FROM STUDENTS
+        WHERE ID = V_ID;
+    EXCEPTION
+        WHEN OTHERS THEN RAISE USER_LOGIN_ERROR;      
+    END;
+    -- 입력한 패스워드가 교수자의 패스워드가 같으면 1 반환
+    IF(V_PW = V_PW2)
+        THEN V_FLAG := 1;
+        ELSE V_FLAG := 2;
+    END IF;
+    
+    -- 변수에 값 저장 , 중도탈락 명단에 있으면 3 반환 
+    SELECT COUNT(*) INTO V_COUNT
+    FROM NON_PASS T1, STUDENT_COURSES_LISTS T2
+    WHERE T1.SCL_NUM = T2.NUM
+      AND V_ID = T2.STUDENT_ID;
+              
+    IF(V_COUNT > 0 )
+        THEN V_FLAG := 3;
+    END IF;
+    
+    RETURN V_FLAG;
+    
+    EXCEPTION 
+        WHEN USER_LOGIN_ERROR
+            THEN RAISE_APPLICATION_ERROR(-20027, '해당 아이디가 존재하지 않습니다.');
+            ROLLBACK;
+
+END;
+
+
+--Ⅱ. 성적 출력 기능 구현
+
+--○ 수강 끝낸 과목만 출력하는 기능 (데이터 :학번)
+CREATE OR REPLACE PROCEDURE PRC_SUBJECTS_OF_STUDENT
+( V_STD_ID  IN  STUDENTS.ID%TYPE
+, V_OUT     OUT SYS_REFCURSOR
+)
+IS
+BEGIN
+    OPEN V_OUT FOR
+        SELECT C.NAME "COURSE_NAME"
+             , S.NAME "SUBJECT_NAME"
+             , OPS.START_DATE
+             , OPS.END_DATE
+        FROM STUDENT_COURSES_LISTS SCL
+           , OP_COURSES OPC
+           , OP_SUBJECTS OPS
+           , PROFESSOR_TEACHABLE_SUBJECTS PTS
+           , SUBJECTS S
+           , COURSES C
+           , NON_PASS NP
+        WHERE SCL.STUDENT_ID = V_STD_ID
+          AND SCL.OP_COURSE_CODE = OPC.CODE
+          AND OPC.COURSE_CODE = C.CODE
+          AND OPS.OP_COURSE_CODE = OPC.CODE
+          AND OPS.PTS_CODE = PTS.CODE
+          AND PTS.SUB_CODE = S.CODE
+          AND OPS.END_DATE < SYSDATE
+          AND NP.SCL_NUM(+) = SCL.NUM
+          AND (NP.NUM IS NULL OR OPS.END_DATE < NP.NP_DATE);
+END;
+
+--○ 수강 끝낸 한 과목 선택 시 성적확인 기능 (과정명, 과목명, 교육기간, 교재명, 출결, 실기, 필기, 총점, 등수)
+--    (매개변수 : 학번, 개설과목코드)
+CREATE OR REPLACE PROCEDURE PRC_SUBJECTS_OF_STUDENT
+( V_STD_ID      IN  STUDENTS.ID%TYPE
+, V_OPS_NUM     IN  OP_SUBJECTS.NUM%TYPE
+, V_OUT         OUT SYS_REFCURSOR
+)
+IS
+BEGIN
+    OPEN V_OUT FOR
+        SELECT T.*
+        FROM
+        (
+            SELECT SCL.STUDENT_ID
+                 , C.NAME "COURSE_NAME"
+                 , S.NAME "SUBJECT_NAME"
+                 , OPS.START_DATE
+                 , OPS.END_DATE
+                 , B.NAME "BOOK_NAME"
+                 , SC.PRESENCE * OPS.PRE_RATE / 100 "PRESENCE"
+                 , SC.WRITING * OPS.WRITE_RATE / 100 "WRITING"
+                 , SC.PRACTICE * OPS.PRAC_RATE / 100 "PRACTICE"
+                 , (SC.PRESENCE * OPS.PRE_RATE + SC.WRITING * OPS.WRITE_RATE + SC.PRACTICE * OPS.PRAC_RATE) / 100 "TOTAL"
+                 , RANK() OVER(ORDER BY (SC.PRESENCE * OPS.PRE_RATE + SC.WRITING * OPS.WRITE_RATE + SC.PRACTICE * OPS.PRAC_RATE) / 100 DESC) "RANK"
+            FROM STUDENT_COURSES_LISTS SCL
+               , OP_COURSES OPC
+               , OP_SUBJECTS OPS
+               , PROFESSOR_TEACHABLE_SUBJECTS PTS
+               , SUBJECTS S
+               , COURSES C
+               , SCORES SC
+               , BOOKS B
+            WHERE SC.OP_SUB_NUM = V_OPS_NUM
+              AND SC.SCL_NUM = SCL.NUM
+              AND SC.OP_SUB_NUM = OPS.NUM
+              AND SCL.OP_COURSE_CODE = OPC.CODE
+              AND OPC.COURSE_CODE = C.CODE
+              AND OPS.OP_COURSE_CODE = OPC.CODE
+              AND OPS.PTS_CODE = PTS.CODE
+              AND PTS.SUB_CODE = S.CODE
+              AND OPS.END_DATE < SYSDATE
+              AND B.NUM(+) = OPS.BOOK_NUM
+        ) T
+        WHERE STUDENT_ID = V_STD_ID;
+END;    
+
+-- ○ 모든 과목을 한 페이지에서 출력(매개변수 :학번)
+-- (과정명, 과목명, 교육기간, 교재명, 출결, 실기, 필기, 총점, 등수)
+CREATE OR REPLACE PROCEDURE PRC_SUBJECTS_OF_STUDENT_DETAIL
+( V_STD_ID  IN  STUDENTS.ID%TYPE
+, V_OUT     OUT SYS_REFCURSOR
+)
+IS
+BEGIN
+    OPEN V_OUT FOR
+        SELECT *
+        FROM
+        (
+            SELECT T.*, RANK() OVER(PARTITION BY T.SUBJECT_NUM ORDER BY T.TOTAL DESC) "RANK"
+            FROM
+            (
+                SELECT SCL.STUDENT_ID
+                     , OPS.NUM "SUBJECT_NUM"
+                     , C.NAME "COURSE_NAME"
+                     , S.NAME "SUBJECT_NAME"
+                     , OPS.START_DATE
+                     , OPS.END_DATE
+                     , B.NAME "BOOK_NAME"
+                     , SC.PRESENCE * OPS.PRE_RATE / 100 "PRESENCE"
+                     , SC.WRITING * OPS.WRITE_RATE / 100 "WRITING"
+                     , SC.PRACTICE * OPS.PRAC_RATE / 100 "PRACTICE"
+                     , (SC.PRESENCE * OPS.PRE_RATE + SC.WRITING * OPS.WRITE_RATE + SC.PRACTICE * OPS.PRAC_RATE) / 100 "TOTAL"
+                FROM STUDENT_COURSES_LISTS SCL
+                   , OP_COURSES OPC
+                   , OP_SUBJECTS OPS
+                   , PROFESSOR_TEACHABLE_SUBJECTS PTS
+                   , SUBJECTS S
+                   , COURSES C
+                   , BOOKS B
+                   , SCORES SC
+                WHERE SCL.OP_COURSE_CODE = OPC.CODE
+                  AND OPC.COURSE_CODE = C.CODE
+                  AND OPS.OP_COURSE_CODE = OPC.CODE
+                  AND OPS.PTS_CODE = PTS.CODE
+                  AND PTS.SUB_CODE = S.CODE
+                  AND OPS.END_DATE < SYSDATE
+                  AND OPS.BOOK_NUM = B.NUM
+                  AND SC.OP_SUB_NUM = OPS.NUM
+                  AND SC.SCL_NUM = SCL.NUM
+            ) T
+        )
+        WHERE STUDENT_ID = V_STD_ID;
+END;
